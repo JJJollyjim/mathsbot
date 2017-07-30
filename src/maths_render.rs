@@ -82,8 +82,12 @@ fn setlimits() -> io::Result<()> {
 }
 
 pub fn render_maths(fragment: &str) -> Result<Vec<u8>, MathsRenderError> {
+    info!("rendering maths: `{}`", fragment);
+
     let dir = TempDir::new("mathsbot-maths-preview")?;
     let dirpath = dir.path();
+
+    debug!("created tmp directory {:?}", dirpath);
 
     let tex = make_tex_file(dirpath, fragment)?;
 
@@ -100,6 +104,8 @@ pub fn render_maths(fragment: &str) -> Result<Vec<u8>, MathsRenderError> {
     if !pdflatex.status.success() {
         return Err(MathsRenderError::LatexError(pdflatex.status, String::from_utf8(pdflatex.stdout)?))
     }
+
+    debug!("LaTeX complete");
 
     let convert = Command::new("convert")
         .current_dir(dirpath)
@@ -118,7 +124,10 @@ pub fn render_maths(fragment: &str) -> Result<Vec<u8>, MathsRenderError> {
         return Err(MathsRenderError::ConvertError)
     }
 
+    debug!("conversion complete");
+
     let mut image: Vec<u8> = Vec::new();
     File::open(tex.with_extension("png"))?.read_to_end(&mut image)?;
+    debug!("image read");
     Ok(image)
 }
