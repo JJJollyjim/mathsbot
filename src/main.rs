@@ -18,7 +18,7 @@ use maths_render::*;
 
 
 fn main() {
-    env_logger::init();
+    let _ = env_logger::init();
 
     // Login with a bot token from the environment
     let mut client = Client::new(&env::var("DISCORD_TOKEN").expect("token"));
