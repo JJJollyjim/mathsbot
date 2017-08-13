@@ -31,12 +31,12 @@ impl From<io::Error> for MathsRenderError {
 fn maths_to_document(maths: &str) -> String {
     let mut str = "\\documentclass{standalone}
 \\usepackage{amsmath}
+\\usepackage{amsfonts}
 \\begin{document}
-$ \\displaystyle
 ".to_owned();
 
     str.push_str(maths);
-    str.push_str("$ \\end{document}");
+    str.push_str("\\end{document}");
     str
 }
 
