@@ -21,19 +21,25 @@ use std::collections::HashMap;
 use maths_render::*;
 use parser::*;
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 struct QualifiedMessageId {
     channel_id: ChannelId,
     message_id: MessageId
 }
 
+impl QualifiedMessageId {
+    fn delete(self: &Self) -> serenity::Result<()> {
+        self.channel_id.delete_message(self.message_id)
+    }
+}
+
 impl<'a> From<&'a Message> for QualifiedMessageId {
     fn from(message: &'a Message) -> QualifiedMessageId {
         QualifiedMessageId {channel_id:  message.channel_id, message_id:  message.id}
-   }
+    }
 }
 
-impl From<QualifiedMessageId> for Result<Message, serenity::Error> {
+impl From<QualifiedMessageId> for serenity::Result<Message> {
     fn from(qual_id: QualifiedMessageId) -> Result<Message, serenity::Error> {
         qual_id.channel_id.message(qual_id.message_id)
     }
@@ -49,12 +55,12 @@ fn handle_message(ctx: Context, message: Message, is_update: bool) {
     let content = message.content_safe();
 
     let mut typemap = ctx.data.lock().unwrap();
-    let mut hashmap = typemap.get_mut::<MessageHistory>().unwrap();
+    let mut history: &mut HashMap<QualifiedMessageId, QualifiedMessageId> = typemap.get_mut::<MessageHistory>().unwrap();
 
-    if is_update {
-        if let Some(response) = hashmap.get(&QualifiedMessageId::from(&message)) {
-            response.edit
-        }
+    let msg_to_delete = history.get(&QualifiedMessageId::from(&message)).cloned();
+
+    if is_update && msg_to_delete.is_none() {
+        warn!("Message {:?} was updated, but is not in the history map", message.id);
     }
 
     match parser::classify_message(&content) {
@@ -63,31 +69,69 @@ fn handle_message(ctx: Context, message: Message, is_update: bool) {
                   message.id, message.author.tag(), is_update);
 
             if message.author.bot {
-                warn!("ignoring {:?} since author is a bot",
+                warn!("LaTeX ignoring {:?} since author is a bot",
                       message.id);
                 return;
             }
 
             match render_maths(&content) {
                 Ok(image) => {
-                    let response = message.channel_id
-                        .send_files(vec![(image.as_slice(), "maths.png")], |m| m)
-                        .unwrap();
+                    if let Ok(response) = message.channel_id.send_files(vec![(image.as_slice(), "maths.png")], |m| m) {
+                        info!("image sent");
 
-                    info!("image sent");
+                        history.insert(QualifiedMessageId::from(&message),
+                                       QualifiedMessageId::from(&response));
 
+                        if let Some(msg) = msg_to_delete {
+                            if msg.delete().is_err() {
+                                error!("Failed to delete message {:?} for some reason :thonking:", msg);
+                            }
+                        }
 
-                    hashmap.insert(QualifiedMessageId::from(&message),
-                                   QualifiedMessageId::from(&response));
+                        debug!("Reactions: {:?}", message.reactions);
+                        for mr in message.reactions {
+                            if mr.me {
+                                debug!("deleting reaction {} from {:?}", mr.reaction_type, message.id);
+                                let _ = message.channel_id.delete_reaction(
+                                    message.id,
+                                    None,
+                                    mr.clone().reaction_type);
+                            }
+                        }
+                    } else {
+                        error!("couldn't send message in response to {:?} for some reason", message.id)
+                    }
+
                 }
                 Err(e) => handle_error(e, message)
             }
 
         }
-        MessageType::Plain => debug!("message {:?} ignored since it is plain; update? {}", message.id, is_update)
+        MessageType::Plain => {
+            debug!("message {:?} ignored since it is plain; update? {}", message.id, is_update);
+
+            if let Some(msg) = msg_to_delete {
+                if msg.delete().is_err() {
+                    error!("Failed to delete message {:?} for some reason :thonking:", msg);
+                }
+            }
+
+            debug!("Reactions: {:?}", message.reactions);
+            for mr in message.reactions {
+                if mr.me {
+                    debug!("deleting reaction {} from {:?}", mr.reaction_type, message.id);
+                    let _ = message.channel_id.delete_reaction(
+                        message.id,
+                        None,
+                        mr.clone().reaction_type);
+                }
+            }
+
+        }
     }
 
-    debug!("{:?}", ctx.data.lock().unwrap().get::<MessageHistory>().unwrap());
+
+    debug!("{:?}", history);
 
 }
 
