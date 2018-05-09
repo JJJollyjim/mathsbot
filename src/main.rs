@@ -14,7 +14,7 @@ mod maths_render;
 mod parser;
 
 use serenity::prelude::*;
-use serenity::model::{MessageId, ChannelId, Message};
+use serenity::model::{self, MessageId, ChannelId, Message, event};
 use serenity::client::{Context};
 use std::env;
 use std::collections::HashMap;
@@ -54,8 +54,8 @@ impl typemap::Key for MessageHistory {
 fn handle_message(ctx: Context, message: Message, is_update: bool) {
     let content = message.content_safe();
 
-    let mut typemap = ctx.data.lock().unwrap();
-    let mut history: &mut HashMap<QualifiedMessageId, QualifiedMessageId> = typemap.get_mut::<MessageHistory>().unwrap();
+    let mut typemap = ctx.data.lock();
+    let history: &mut HashMap<QualifiedMessageId, QualifiedMessageId> = typemap.get_mut::<MessageHistory>().unwrap();
 
     let msg_to_delete = history.get(&QualifiedMessageId::from(&message)).cloned();
 
@@ -135,36 +135,34 @@ fn handle_message(ctx: Context, message: Message, is_update: bool) {
 
 }
 
-fn main() {
-    let _ = env_logger::init();
+struct Handler;
 
-    // Login with a bot token from the environment
-    let mut client = Client::new(&env::var("DISCORD_TOKEN").expect("token"));
-
-    client.data.lock().unwrap().insert::<MessageHistory>(HashMap::default());
-
-    client.with_framework(|f| {
-        debug!("configuring framework");
-        f.configure(|c| c.prefix("!")) // set the bot's prefix to "!"
-            .on("ping", ping)
-    });
-
-    client.on_ready(|ctx, _| {
+impl EventHandler for Handler {
+    fn on_ready(&self, ctx: Context, _: model::Ready) {
         ctx.set_game_name("LaTeX");
         info!("bot ready");
-    });
+    }
 
-    client.on_message(|ctx, message| {
+    fn on_message(&self, ctx: Context, message: Message) {
         handle_message(ctx, message, false);
-    });
+    }
 
-    client.on_message_update(|ctx, update| {
+    fn on_message_update(&self, ctx: Context, update: event::MessageUpdateEvent) {
         if let Ok(message) = update.channel_id.message(update.id) {
             handle_message(ctx, message, true);
         } else {
             warn!("failed to get the message that was updated (id {:?})", update.id);
         }
-    });
+    }
+}
+
+fn main() {
+    let _ = env_logger::init();
+
+    // Login with a bot token from the environment
+    let mut client = Client::new(&env::var("DISCORD_TOKEN").expect("token"), Handler);
+
+    client.data.lock().insert::<MessageHistory>(HashMap::default());
 
     // start listening for events by starting a single shard
     let _ = client.start();
